@@ -1,6 +1,6 @@
 import express from "express";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "../firebase.js"; // Firebase client SDK
+import {collection, getDoc, getDocs} from "firebase/firestore";
+import {db, doc} from "../firebase.js"; // Firebase client SDK
 import Airtable from "airtable";
 import dotenv from "dotenv";
 
@@ -142,5 +142,20 @@ router.post("/teachers", async (req, res) => {
         });
     }
 });
+
+router.post("/semester/schools/students", async (req, res) => {
+    const { semester_id, school_id } = req.body;
+    const studentDocument = doc(db, "Semester", semester_id, "Schools", school_id)
+
+    const students = getDoc(studentDocument).then((snapshot) => {
+        const data = snapshot.data()
+        const students = data.Students
+        return res.status(200).json({students})
+    }).catch((err) => {
+        return res.status(400).json({
+            message: `Unable to retrieve students from semester ${semester_id} and school ${school_id}`,
+        })
+    });
+})
 
 export default router;

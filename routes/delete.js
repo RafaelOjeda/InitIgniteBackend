@@ -1,5 +1,5 @@
 import express from "express";
-import {auth, db, deleteDoc, deleteUser, doc} from "../firebase.js";
+import {arrayRemove, auth, db, deleteDoc, deleteUser, doc, updateDoc} from "../firebase.js";
 
 const router = express.Router();
 
@@ -68,8 +68,28 @@ router.post("/semester/student", async (req, res) => {
     }
 })
 
-router.post("/school/student", async (req, res) => {
-    const { student_id, semester_id } = req.body;
-})
+router.post("/semester/school/student", async (req, res) => {
+    const { semester_id, school_id, student_id } = req.body;
+    const studentDocument = doc(db, "Semester", semester_id, "Schools", school_id);
+
+    try {
+        // Update the Firestore document to remove the student_id from the Students array
+        await updateDoc(studentDocument, {
+            Students: arrayRemove(student_id),
+        });
+
+        console.log(`Successfully removed UID: ${student_id} from document: ${school_id}`);
+
+        return res.status(200).json({
+            message: `Deleted student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+        });
+    } catch (err) {
+        console.error(`Error removing student ${student_id}:`, err);
+
+        return res.status(400).json({
+            message: `Unable to delete student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+        });
+    }
+});
 
 export default router;

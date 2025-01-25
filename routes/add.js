@@ -1,8 +1,34 @@
 import express from "express";
 import { doc, setDoc } from "firebase/firestore";
-import { db } from "../firebase.js"; // Firebase client SDK
+import {arrayRemove, db, updateDoc} from "../firebase.js"; // Firebase client SDK
 
 const router = express.Router();
+
+router.post("/semester/school/student", async (req, res) => {
+    const { semester_id, school_id, student_id } = req.body;
+
+    // Reference to the Firestore document
+    const studentDocument = doc(db, "Semester", semester_id, "Schools", school_id);
+
+    try {
+        // Update the Firestore document to remove the student_id from the Students array
+        await updateDoc(studentDocument, {
+            Students: arrayRemove(student_id),
+        });
+
+        console.log(`Successfully added UID: ${student_id} from document: ${school_id}`);
+
+        return res.status(200).json({
+            message: `Added student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+        });
+    } catch (err) {
+        console.error(`Error removing student ${student_id}:`, err);
+
+        return res.status(400).json({
+            message: `Unable to add student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+        });
+    }
+});
 
 /* Add a student to a semester */
 router.post("/users", async (req, res) => {

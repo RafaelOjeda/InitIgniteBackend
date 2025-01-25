@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut, deleteUser } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, updateDoc, getDocs, deleteDoc} from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, updateDoc, getDocs, deleteDoc, arrayRemove} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from "./firebaseConfig.js";
 
@@ -18,4 +18,5 @@ export { auth,
     db,
     doc,
     setDoc, getDoc,
-    collection, updateDoc, getDocs, deleteDoc, deleteUser }
+    collection, updateDoc, getDocs, deleteDoc, deleteUser, arrayRemove
+}
