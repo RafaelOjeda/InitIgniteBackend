@@ -19,7 +19,12 @@ router.post("/register", async (req, res) => {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const userDocRef = doc(db, "Users", userCredential.user.uid);
 
-        await setDoc(userDocRef, { email, name });
+        await setDoc(userDocRef, {
+            email,
+            name,
+            active_semesters: [],
+            teacher_ids: []
+        });
         console.log("User successfully created:", userCredential.user.uid);
 
         res.status(200).json({
