@@ -11,6 +11,24 @@ const router = express.Router();
 const apiKey = process.env.AIRTABLE_API_KEY;
 const databaseID = process.env.AIRTABLE_DATABASE_ID;
 
+String.prototype.hashCode = function() {
+    let hash = 0,
+        i, chr;
+    if (this.length === 0) return hash;
+    for (i = 0; i < this.length; i++) {
+        chr = this.charCodeAt(i);
+        hash = ((hash << 5) - hash) + chr;
+        hash |= 0; // Convert to 32bit integer
+        hash = Math.abs(hash)
+    }
+    return hash;
+}
+
+function hashClassroomId(classroom_id) {
+    classroom_id.trim().toLowerCase()
+    return classroom_id.hashCode()
+}
+
 async function getTeachersInfo(teacher_airtable_id) {
     const teachers = [];
     const base = new Airtable({ apiKey }).base(databaseID);
@@ -66,28 +84,18 @@ function filterSchools(response) {
 
 async function addClassroom(school_id, semester_id, teacher_id) {
     const appendedKey = semester_id.toString() + teacher_id.toString();
-    const hashedKey = appendedKey.hashCode()
+    const hashedKey = hashClassroomId(appendedKey)
+
+    console.log("appendedKey:", appendedKey); // Log for debugging
+    console.log("hashedKey:", hashedKey);     // Log for debugging
 
     const docRef = doc(db, "Classroom", hashedKey.toString())
     await setDoc( docRef, {
-        school_id: doc(db, "School", school_id),
-        semester_id: doc(db, "Semester", semester_id),
-        teacher_id: doc(db, "Teacher", teacher_id),
+        school_id: school_id,
+        semester_id: semester_id,
+        teacher_id: teacher_id,
         teacher_students: []
     });
-}
-
-String.prototype.hashCode = function() {
-    let hash = 0,
-        i, chr;
-    if (this.length === 0) return hash;
-    for (i = 0; i < this.length; i++) {
-        chr = this.charCodeAt(i);
-        hash = ((hash << 5) - hash) + chr;
-        hash |= 0; // Convert to 32bit integer
-        hash = Math.abs(hash)
-    }
-    return hash;
 }
 
 if (!apiKey) {
@@ -97,6 +105,44 @@ if (!apiKey) {
 if (!databaseID) {
     throw new Error("Airtable Database ID is missing. Ensure AIRTABLE_DATABASE_ID is set in the .env file.");
 }
+
+router.post("/classroom/teacher_students", async (req, res) => {
+    const { teacher_student_id, semester_id, teacher_id } = req.body;
+
+    console.log(req.body)
+
+    if (!semester_id || !teacher_student_id || !teacher_id) {
+        return res.status(400).json({ /* ... */ });
+    }
+
+    const appendedKey = semester_id.toString() + teacher_id.toString();
+
+    let hashedKey = hashClassroomId(appendedKey)
+
+    console.log("appendedKey:", appendedKey);
+    console.log("hashedKey:", hashedKey);
+
+
+    try {
+        const classroomRef = doc(db, "Classroom", hashedKey.toString()); // Convert to string here
+
+        await updateDoc(classroomRef, {
+            teacher_students: arrayUnion(teacher_student_id),
+        });
+
+        res.status(200).json({
+            status: "success",
+            message: "Teacher/student ID added to classroom",
+        });
+
+    } catch (error) {
+        console.error("Error updating classroom:", error);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+});
 
 router.post("/semester/teachers", async (req, res) => {
     const {airtable_id, semester_id} = req.body
@@ -113,18 +159,18 @@ router.post("/semester/teachers", async (req, res) => {
             const teacherRef = doc(collection(db, "Teacher"), teacher.teacher_id);
 
             await updateDoc(semesterRef, {
-                teachers: arrayUnion(teacherRef),
+                teachers: arrayUnion(teacher.teacher_id),
             });
 
             teacherBatch.set(teacherRef, {
                 name: teacher.name,
                 email: teacher.email,
                 phone_number: teacher.phone_number,
-                school_id: doc(db, "Schools", teacher.school_id),
-                semester_id: doc(db, "Semester", semester_id)
+                school_id: teacher.school_id,
+                semester_id: semester_id
             });
 
-            addClassroom(teacher.school_id, semester_id, teacher.teacher_id);
+            await addClassroom(teacher.school_id, semester_id, teacher.teacher_id);
         }
 
         await teacherBatch.commit(); // ✅ Commit batch writes
@@ -210,12 +256,12 @@ router.post("/semester/student", async (req, res) => {
     try {
         // Add semester reference to the student's active semesters
         await updateDoc(studentRef, {
-            semester_id: arrayUnion(semesterRef),
+            semester_id: arrayUnion(semester_id),
         });
 
         // Add student UUID to the semester's students array
         await updateDoc(semesterRef, {
-            students: arrayUnion(student_id),
+            teacher_students: arrayUnion(student_id),
         });
 
         console.log("Student successfully added to semester.");
@@ -235,12 +281,12 @@ router.post("/semester/student", async (req, res) => {
 
 /* Add a semester */
 router.post("/semester", async (req, res) => {
-    const { semester_id, start_date, end_date } = req.body;
+    const { semester_id, semester_start_date, semester_end_date } = req.body;
 
-    if (!semester_id || !start_date || !end_date) {
+    if (!semester_id || !semester_start_date || !semester_end_date) {
         return res.status(400).json({
             status: "error",
-            message: "semester_id, start_date, and end_date are required.",
+            message: "semester_id, semester_start_date, and semester_end_date are required.",
             submission: req.body,
         });
     }
@@ -248,8 +294,8 @@ router.post("/semester", async (req, res) => {
     try {
         const docRef = doc(db, "Semester", semester_id);
         await setDoc(docRef, {
-            semester_start_date: start_date,
-            semester_end_date: end_date,
+            semester_start_date: semester_start_date,
+            semester_end_date: semester_end_date,
             teachers: [],
             teacher_students: []
         });

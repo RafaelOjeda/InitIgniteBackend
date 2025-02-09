@@ -11,6 +11,37 @@ import {
 
 const router = express.Router();
 
+router.delete("/classroom/teacher_students", async (req, res) => { // Use DELETE method
+    const { classroom_id, teacher_student_id } = req.body; // Expecting classroom_id and teacher_student_id
+
+    if (!classroom_id || !teacher_student_id) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required fields: classroom_id and teacher_student_id",
+        });
+    }
+
+    try {
+        const classroomRef = doc(db, "Classroom", classroom_id);
+
+        await updateDoc(classroomRef, {
+            teacher_students: arrayRemove(teacher_student_id), // Use arrayRemove to delete
+        });
+
+        res.status(200).json({
+            status: "success",
+            message: "Teacher/student ID removed from classroom",
+        });
+
+    } catch (error) {
+        console.error("Error updating classroom:", error);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+});
+
 router.delete("/user/currentUser", async (req, res) => {
     const currentUser = auth.currentUser;
 

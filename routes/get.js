@@ -1,5 +1,5 @@
 import express from "express";
-import {db} from "../firebase.js"; // Firebase client SDK
+import {collection, db, doc, getDoc, getDocs} from "../firebase.js"; // Firebase client SDK
 import Airtable from "airtable";
 import dotenv from "dotenv";
 
@@ -18,6 +18,41 @@ if (!apiKey) {
 if (!databaseID) {
     throw new Error("Airtable Database ID is missing. Ensure AIRTABLE_DATABASE_ID is set in the .env file.");
 }
+
+router.get("/classroom", async (req, res) => {
+    const { classroom_id } = req.body;
+
+    if (!classroom_id) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required field: classroom_id",
+        });
+    }
+
+    try {
+        const classroomRef = doc(db, "Classroom", classroom_id); // Reference to the document
+        const classroomSnapshot = await getDoc(classroomRef);  // Get the document
+
+        if (classroomSnapshot.exists()) {  // Check if the document exists
+            const classroomData = classroomSnapshot.data(); // Get the data
+            res.status(200).json({
+                status: "success",
+                data: classroomData,
+            });
+        } else {
+            res.status(404).json({
+                status: "error",
+                message: "Classroom not found",
+            });
+        }
+    } catch (error) {
+        console.error("Error fetching classroom:", error.message);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+});
 
 /* Get users by semester */
 router.get("/users", async (req, res) => {
