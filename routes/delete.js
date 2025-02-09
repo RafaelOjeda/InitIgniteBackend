@@ -1,93 +1,166 @@
 import express from "express";
-import {arrayRemove, auth, db, deleteDoc, deleteUser, doc, updateDoc} from "../firebase.js";
+import {
+    arrayRemove,
+    auth,
+    db,
+    deleteDoc,
+    deleteUser,
+    doc,
+    updateDoc
+} from "../firebase.js";
 
 const router = express.Router();
 
-router.post("/user/currentUser", async (req, res) => {
+router.delete("/classroom/teacher_students", async (req, res) => { // Use DELETE method
+    const { classroom_id, teacher_student_id } = req.body; // Expecting classroom_id and teacher_student_id
+
+    if (!classroom_id || !teacher_student_id) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required fields: classroom_id and teacher_student_id",
+        });
+    }
+
+    try {
+        const classroomRef = doc(db, "Classroom", classroom_id);
+
+        await updateDoc(classroomRef, {
+            teacher_students: arrayRemove(teacher_student_id), // Use arrayRemove to delete
+        });
+
+        res.status(200).json({
+            status: "success",
+            message: "Teacher/student ID removed from classroom",
+        });
+
+    } catch (error) {
+        console.error("Error updating classroom:", error);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+});
+
+router.delete("/user/currentUser", async (req, res) => {
     const currentUser = auth.currentUser;
-    const currentUserId = currentUser.uid;
+
     if (!currentUser) {
         return res.status(401).json({ message: "You are not logged in!" });
     }
 
-    deleteUser(currentUser).then(() => {
-        console.log(
-            `User: ${currentUser} deleted from Authentication successfully.`
-        );
-    }).catch((err) => {
-        console.log(
-            `Could not delete user: ${currentUserId} from Authentication. Reason: ${err}`
-        );
-        return res.status(400).json(
-            {
-                message: `Unable to delete user: ${currentUserId} from Authentication. Reason: ${err}`
-            }
-            );
-    });
-    console.log(currentUserId)
-    deleteDoc(doc(db, "Users", currentUserId)).then(() => {
-        console.log(
-            `User: ${currentUser} deleted from Users collection successfully.`
-        );
-    }).catch((err) => {
-        console.log(
-            `Could not delete user: ${currentUserId} from Users collection. Reason: ${err}`
-        );
-        return res.status(400).json(
-            {
-                message: `Unable to delete user: ${currentUserId} from Users collection. Reason: ${err}`
-            }
-        );
-    })
-
-    return res.status(200).json(
-        {
-            message: `Deleted user ${currentUser}`
-        }
-        );
-})
-
-router.post("/semester/student", async (req, res) => {
-    const { semester, student_id} = req.body;
+    const currentUserId = currentUser.uid;
 
     try {
-        await deleteDoc(doc(db, "Semester", semester, "students", student_id));
+        await deleteUser(currentUser);
+        console.log(`User: ${currentUserId} deleted from Authentication successfully.`);
 
-        console.log(`Student ${student_id} document successfully removed from semester: ${semester}.`);
-        res.status(200).json({
+        await deleteDoc(doc(db, "Users", currentUserId));
+        console.log(`User: ${currentUserId} deleted from Users collection successfully.`);
+
+        return res.status(200).json({ message: `Deleted user ${currentUserId}` });
+    } catch (err) {
+        console.error(`Error deleting user ${currentUserId}: ${err}`);
+        return res.status(500).json({
+            message: `Unable to delete user: ${currentUserId}. Reason: ${err.message}`
+        });
+    }
+});
+
+router.delete("/semester/", async (req, res) => {
+    const { semester_id } = req.body;
+
+    if (!semester_id) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required field: semester_id.",
+            submission: req.body,
+        });
+    }
+
+    try {
+        await deleteDoc(doc(db, "Semester", semester_id));
+        console.log(`Semester ${semester_id} successfully removed.`);
+
+        return res.status(200).json({
             status: "success",
+            message: "Semester successfully removed.",
             submission: req.body,
         });
     } catch (error) {
-        console.log(error);
-        res.status(500).json({
+        console.error(`Error removing semester ${semester_id}:`, error);
+        return res.status(500).json({
             status: "error",
-            message: `An error occurred: ${error}`,
+            message: "Failed to remove semester.",
             submission: req.body,
-        })
+        });
     }
-})
+});
 
-router.post("/semester/school/student", async (req, res) => {
-    const { semester_id, school_id, student_id } = req.body;
-    const studentDocument = doc(db, "Semester", semester_id, "Schools", school_id);
+router.post("/semester/teacher", async (req, res) => {
+    const { semester_id, teacher_id } = req.body;
+
+    if (!semester_id || !teacher_id) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required fields: teacher_id or semester_id.",
+            submission: req.body,
+        });
+    }
+
+    const semesterRef = doc(db, "Semester", semester_id);
+    const teacherRef = doc(db, "Teacher", teacher_id);
 
     try {
-        // Update the Firestore document to remove the student_id from the Students array
-        await updateDoc(studentDocument, {
-            Students: arrayRemove(student_id),
-        });
+        await updateDoc(teacherRef, { semesters: arrayRemove(semester_id) });
+        await updateDoc(semesterRef, { teachers: arrayRemove(teacher_id) });
 
-        console.log(`Successfully removed UID: ${student_id} from document: ${school_id}`);
-
+        console.log(`Teacher ${teacher_id} successfully removed from semester ${semester_id}.`);
         return res.status(200).json({
-            message: `Deleted student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+            status: "success",
+            message: "Teacher successfully removed from semester.",
+            submission: req.body,
         });
-    } catch (err) {
-        console.error(`Error removing student ${student_id}:`, err);
+    } catch (error) {
+        console.error(`Error removing teacher ${teacher_id} from semester ${semester_id}:`, error);
+        return res.status(500).json({
+            status: "error",
+            message: "Failed to update documents.",
+            submission: req.body,
+        });
+    }
+});
 
+router.delete("/semester/student", async (req, res) => {
+    const { student_id, semester_id } = req.body;
+
+    if (!student_id || !semester_id) {
         return res.status(400).json({
-            message: `Unable to delete student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+            status: "error",
+            message: "Missing required fields: student_id or semester_id.",
+            submission: req.body,
+        });
+    }
+
+    const semesterRef = doc(db, "Semester", semester_id);
+    const studentRef = doc(db, "Users", student_id);
+
+    try {
+        await updateDoc(studentRef, { semesters: arrayRemove(semester_id) });
+        await updateDoc(semesterRef, { students: arrayRemove(student_id) });
+
+        console.log(`Student ${student_id} successfully removed from semester ${semester_id}.`);
+        return res.status(200).json({
+            status: "success",
+            message: "Student successfully removed from semester.",
+            submission: req.body,
+        });
+    } catch (error) {
+        console.error(`Error removing student ${student_id} from semester ${semester_id}:`, error);
+        return res.status(500).json({
+            status: "error",
+            message: "Failed to update documents.",
+            submission: req.body,
         });
     }
 });

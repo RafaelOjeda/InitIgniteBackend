@@ -1,62 +1,279 @@
 import express from "express";
-import { doc, setDoc } from "firebase/firestore";
-import {arrayRemove, db, updateDoc} from "../firebase.js"; // Firebase client SDK
+import {collection, doc, setDoc} from "../firebase.js";
+import {arrayUnion, db, updateDoc, writeBatch} from "../firebase.js";
+import dotenv from "dotenv";
+import Airtable from "airtable";
+
+dotenv.config(); // Load environment variables from .env file
 
 const router = express.Router();
 
-router.post("/semester/school/student", async (req, res) => {
-    const { semester_id, school_id, student_id } = req.body;
+const apiKey = process.env.AIRTABLE_API_KEY;
+const databaseID = process.env.AIRTABLE_DATABASE_ID;
 
-    // Reference to the Firestore document
-    const studentDocument = doc(db, "Semester", semester_id, "Schools", school_id);
+String.prototype.hashCode = function() {
+    let hash = 0,
+        i, chr;
+    if (this.length === 0) return hash;
+    for (i = 0; i < this.length; i++) {
+        chr = this.charCodeAt(i);
+        hash = ((hash << 5) - hash) + chr;
+        hash |= 0; // Convert to 32bit integer
+        hash = Math.abs(hash)
+    }
+    return hash;
+}
+
+function hashClassroomId(classroom_id) {
+    classroom_id.trim().toLowerCase()
+    return classroom_id.hashCode()
+}
+
+async function getTeachersInfo(teacher_airtable_id) {
+    const teachers = [];
+    const base = new Airtable({ apiKey }).base(databaseID);
 
     try {
-        // Update the Firestore document to remove the student_id from the Students array
-        await updateDoc(studentDocument, {
-            Students: arrayRemove(student_id),
+        await new Promise((resolve, reject) => {
+            base(teacher_airtable_id)
+                .select({ view: "Grid view" })
+                .eachPage(
+                    (records, fetchNextPage) => {
+                        records.forEach((record) => teachers.push(record));
+                        fetchNextPage();
+                    },
+                    (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    }
+                );
         });
 
-        console.log(`Successfully added UID: ${student_id} from document: ${school_id}`);
+        return teachers.map((teacher) => ({
+            id: teacher.id,
+            fields: teacher.fields,
+        }));
+    } catch (error) {
+        console.error("Error fetching data from Airtable:", error);
+        throw new Error("Failed to fetch teacher data.");
+    }
+}
 
-        return res.status(200).json({
-            message: `Added student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+function filterTeachers(response) {
+    return {
+        teacher_list: response.map(teacher => ({
+            teacher_id: teacher["id"],
+            name: teacher.fields["Name"],
+            email: teacher.fields["Name copy"], // Assuming "Name copy" contains the email
+            phone_number: teacher.fields["Phone Number"],
+            school_id: teacher.fields["School Address"].toLowerCase().hashCode().toString(),
+        }))
+    };
+}
+
+function filterSchools(response) {
+    return {
+        school_list: response.map(teacher => ({
+            teacher_id: teacher["id"],
+            school_name: teacher.fields["School Name"],
+            school_address: teacher.fields["School Address"],
+            school_id: teacher.fields["School Address"].toLowerCase().hashCode().toString(),
+        }))
+    };
+}
+
+async function addClassroom(school_id, semester_id, teacher_id) {
+    const appendedKey = semester_id.toString() + teacher_id.toString();
+    const hashedKey = hashClassroomId(appendedKey)
+
+    console.log("appendedKey:", appendedKey); // Log for debugging
+    console.log("hashedKey:", hashedKey);     // Log for debugging
+
+    const docRef = doc(db, "Classroom", hashedKey.toString())
+    await setDoc( docRef, {
+        school_id: school_id,
+        semester_id: semester_id,
+        teacher_id: teacher_id,
+        teacher_students: []
+    });
+}
+
+if (!apiKey) {
+    throw new Error("Airtable API key is missing. Ensure AIRTABLE_API_KEY is set in the .env file.");
+}
+
+if (!databaseID) {
+    throw new Error("Airtable Database ID is missing. Ensure AIRTABLE_DATABASE_ID is set in the .env file.");
+}
+
+router.post("/classroom/teacher_students", async (req, res) => {
+    const { teacher_student_id, semester_id, teacher_id } = req.body;
+
+    console.log(req.body)
+
+    if (!semester_id || !teacher_student_id || !teacher_id) {
+        return res.status(400).json({ /* ... */ });
+    }
+
+    const appendedKey = semester_id.toString() + teacher_id.toString();
+
+    let hashedKey = hashClassroomId(appendedKey)
+
+    console.log("appendedKey:", appendedKey);
+    console.log("hashedKey:", hashedKey);
+
+
+    try {
+        const classroomRef = doc(db, "Classroom", hashedKey.toString()); // Convert to string here
+
+        await updateDoc(classroomRef, {
+            teacher_students: arrayUnion(teacher_student_id),
         });
-    } catch (err) {
-        console.error(`Error removing student ${student_id}:`, err);
 
-        return res.status(400).json({
-            message: `Unable to add student ${student_id} from semester ${semester_id} and school ${school_id}.`,
+        res.status(200).json({
+            status: "success",
+            message: "Teacher/student ID added to classroom",
+        });
+
+    } catch (error) {
+        console.error("Error updating classroom:", error);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
         });
     }
 });
 
-/* Add a student to a semester */
-router.post("/users", async (req, res) => {
-    const { studentId, studentName, semester } = req.body;
+router.post("/semester/teachers", async (req, res) => {
+    const {airtable_id, semester_id} = req.body
 
-    if (!studentId || !studentName || !semester) {
+    try {
+        const teacherList = await getTeachersInfo(airtable_id);
+        const teacherListResponse = filterTeachers(teacherList);
+
+        const teacherBatch = writeBatch(db);
+
+        const semesterRef = doc(collection(db, "Semester"), semester_id);
+
+        for (const teacher of teacherListResponse.teacher_list) {
+            const teacherRef = doc(collection(db, "Teacher"), teacher.teacher_id);
+
+            await updateDoc(semesterRef, {
+                teachers: arrayUnion(teacher.teacher_id),
+            });
+
+            teacherBatch.set(teacherRef, {
+                name: teacher.name,
+                email: teacher.email,
+                phone_number: teacher.phone_number,
+                school_id: teacher.school_id,
+                semester_id: semester_id
+            });
+
+            await addClassroom(teacher.school_id, semester_id, teacher.teacher_id);
+        }
+
+        await teacherBatch.commit(); // ✅ Commit batch writes
+
+        return res.status(200).json(teacherListResponse);
+
+    } catch (error) {
+        return res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+});
+
+router.post("/semester/schools", async (req, res) => {
+    const {airtable_id} = req.body;
+
+    if (!airtable_id) {
+        return res.status(400).json({ status: "error", message: "Missing airtable_id" });
+    }
+
+    try {
+        const schoolList = await getTeachersInfo(airtable_id);
+        if (!schoolList || !Array.isArray(schoolList)) {
+            return res.status(404).json({ status: "error", message: "No schools found" });
+        }
+
+        const schoolListResponse = filterSchools(schoolList);
+        if (!schoolListResponse.school_list || schoolListResponse.school_list.length === 0) {
+            return res.status(404).json({ status: "error", message: "No valid schools found after filtering" });
+        }
+
+        console.log("Filtered Schools:", schoolListResponse.school_list);
+
+        const schoolBatch = writeBatch(db);
+
+        schoolListResponse.school_list.forEach((school) => {
+            if (!school.school_name) {
+                console.error("Skipping school due to missing name:", school);
+                return; // Skip writing if school_name is missing
+            }
+
+            const schoolRef = doc(collection(db, "School"), school.school_id);
+            schoolBatch.set(schoolRef, {
+                school_name: school.school_name,
+                school_address: school.school_address,
+                teachers: []
+            });
+        });
+
+        await schoolBatch.commit(); // ✅ Commit batch writes
+
+        return res.status(200).json({
+            status: "success",
+            message: "Schools added successfully",
+        });
+
+    } catch (error) {
+        console.error("Error adding schools:", error);
+        return res.status(500).json({
+            status: "error",
+            message: error.message || "Internal server error",
+        });
+    }
+
+})
+
+/* Add a student to a semester */
+router.post("/semester/student", async (req, res) => {
+    const { student_id, semester_id } = req.body;
+
+    if (!student_id || !semester_id) {
         return res.status(400).json({
             status: "error",
-            message: "Missing required fields: studentId, studentName, or semester.",
+            message: "Missing required fields: studentId or semester.",
             submission: req.body,
         });
     }
 
+    const semesterRef = doc(db, "Semester", semester_id);
+    const studentRef = doc(db, "Users", student_id);
+
     try {
-        const docRef = doc(db, "Semester", semester, "students", studentId);
-        await setDoc(docRef, {
-            name: studentName,
+        // Add semester reference to the student's active semesters
+        await updateDoc(studentRef, {
+            semester_id: arrayUnion(semester_id),
         });
-        console.log("Student document successfully written.");
+
+        // Add student UUID to the semester's students array
+        await updateDoc(semesterRef, {
+            teacher_students: arrayUnion(student_id),
+        });
+
+        console.log("Student successfully added to semester.");
         res.status(200).json({
             status: "success",
             submission: req.body,
         });
     } catch (error) {
-        console.error("Error adding student:", error);
+        console.error("Error adding student to semester:", error);
         res.status(500).json({
             status: "error",
-            message: "Failed to write document.",
+            message: "Failed to update documents.",
             submission: req.body,
         });
     }
@@ -64,12 +281,12 @@ router.post("/users", async (req, res) => {
 
 /* Add a semester */
 router.post("/semester", async (req, res) => {
-    const { semester_id, semester_name, start_date, end_date } = req.body;
+    const { semester_id, semester_start_date, semester_end_date } = req.body;
 
-    if (!semester_id || !semester_name || !start_date || !end_date) {
+    if (!semester_id || !semester_start_date || !semester_end_date) {
         return res.status(400).json({
             status: "error",
-            message: "semester_id, semester_name, start_date, and end_date are required.",
+            message: "semester_id, semester_start_date, and semester_end_date are required.",
             submission: req.body,
         });
     }
@@ -77,10 +294,10 @@ router.post("/semester", async (req, res) => {
     try {
         const docRef = doc(db, "Semester", semester_id);
         await setDoc(docRef, {
-            semester_id,
-            semester_name,
-            semester_start_date: start_date,
-            semester_end_date: end_date,
+            semester_start_date: semester_start_date,
+            semester_end_date: semester_end_date,
+            teachers: [],
+            teacher_students: []
         });
         console.log("Semester document successfully written.");
         res.status(200).json({
@@ -92,35 +309,6 @@ router.post("/semester", async (req, res) => {
         res.status(500).json({
             status: "error",
             message: "Failed to write document.",
-            submission: req.body,
-        });
-    }
-});
-
-/* Add a task */
-router.post("/task", async (req, res) => {
-    const { taskName, taskType, taskDeadline, semester } = req.body;
-
-    if (!taskName || !taskType || !taskDeadline || !semester) {
-        return res.status(400).json({
-            status: "error",
-            message: "taskName, taskType, taskDeadline, and semester are required.",
-            submission: req.body,
-        });
-    }
-
-    try {
-        // Logic for adding the task can be implemented here. For now, this is a placeholder.
-        console.log("Task details:", { taskName, taskType, taskDeadline, semester });
-        res.status(200).json({
-            status: "success",
-            submission: req.body,
-        });
-    } catch (error) {
-        console.error("Error adding task:", error);
-        res.status(500).json({
-            status: "error",
-            message: "Failed to add task.",
             submission: req.body,
         });
     }

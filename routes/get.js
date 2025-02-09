@@ -1,6 +1,5 @@
 import express from "express";
-import {collection, getDoc, getDocs} from "firebase/firestore";
-import {db, doc} from "../firebase.js"; // Firebase client SDK
+import {collection, db, doc, getDoc, getDocs} from "../firebase.js"; // Firebase client SDK
 import Airtable from "airtable";
 import dotenv from "dotenv";
 
@@ -20,8 +19,43 @@ if (!databaseID) {
     throw new Error("Airtable Database ID is missing. Ensure AIRTABLE_DATABASE_ID is set in the .env file.");
 }
 
+router.get("/classroom", async (req, res) => {
+    const { classroom_id } = req.body;
+
+    if (!classroom_id) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required field: classroom_id",
+        });
+    }
+
+    try {
+        const classroomRef = doc(db, "Classroom", classroom_id); // Reference to the document
+        const classroomSnapshot = await getDoc(classroomRef);  // Get the document
+
+        if (classroomSnapshot.exists()) {  // Check if the document exists
+            const classroomData = classroomSnapshot.data(); // Get the data
+            res.status(200).json({
+                status: "success",
+                data: classroomData,
+            });
+        } else {
+            res.status(404).json({
+                status: "error",
+                message: "Classroom not found",
+            });
+        }
+    } catch (error) {
+        console.error("Error fetching classroom:", error.message);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+});
+
 /* Get users by semester */
-router.post("/users", async (req, res) => {
+router.get("/users", async (req, res) => {
     const { semester_id } = req.body;
 
     if (!semester_id) {
@@ -56,7 +90,7 @@ router.post("/users", async (req, res) => {
 });
 
 /* Get all teacher's students */
-router.post("/teacher_students", async (req, res) => {
+router.get("/teacher_students", async (req, res) => {
     try {
         const querySnapshot = await getDocs(collection(db, "Users"));
         const students = querySnapshot.docs.map((doc) => ({
@@ -78,32 +112,8 @@ router.post("/teacher_students", async (req, res) => {
     }
 });
 
-/* Get all semesters */
-router.post("/semesters", async (req, res) => {
-    try {
-        const querySnapshot = await getDocs(collection(db, "Semester"));
-        const semesters = querySnapshot.docs.map((doc) => ({
-            semester_end_date: doc.data().semester_end_date,
-            semester_id: doc.data().semester_id,
-            semester_name: doc.data().semester_name,
-            semester_start_date: doc.data().semester_start_date,
-        }));
-
-        res.status(200).json({
-            status: "success",
-            data: semesters,
-        });
-    } catch (error) {
-        console.error("Error fetching semesters:", error.message);
-        res.status(500).json({
-            status: "error",
-            message: error.message,
-        });
-    }
-});
-
 /* Get all teachers */
-router.post("/teachers", async (req, res) => {
+router.get("/teachers", async (req, res) => {
     const teachers = [];
     const base = new Airtable(
         { apiKey })
@@ -143,19 +153,29 @@ router.post("/teachers", async (req, res) => {
     }
 });
 
-router.post("/semester/schools/students", async (req, res) => {
-    const { semester_id, school_id } = req.body;
-    const studentDocument = doc(db, "Semester", semester_id, "Schools", school_id)
+/* Get all semesters */
+router.get("/semesters", async (req, res) => {
+    try {
+        const querySnapshot = await getDocs(collection(db, "Semester"));
+        const semesters = querySnapshot.docs.map((doc) => ({
+            semester_id: doc.id,
+            semester_start_date: doc.data().semester_start_date,
+            semester_end_date: doc.data().semester_end_date,
+            teachers: doc.data().teachers,
+            teacher_students: doc.data().teacher_students
+        }));
 
-    const students = getDoc(studentDocument).then((snapshot) => {
-        const data = snapshot.data()
-        const students = data.Students
-        return res.status(200).json({students})
-    }).catch((err) => {
-        return res.status(400).json({
-            message: `Unable to retrieve students from semester ${semester_id} and school ${school_id}`,
-        })
-    });
-})
+        res.status(200).json({
+            status: "success",
+            data: semesters,
+        });
+    } catch (error) {
+        console.error("Error fetching semesters:", error.message);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+});
 
 export default router;
