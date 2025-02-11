@@ -8,8 +8,27 @@ import {
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth } from "../firebase.js"; // Firebase client SDK
 import { db } from "../firebase.js";
+import {admin_auth} from "../firebaseAdmin.js";
 
 const router = express.Router();
+
+router.post("/is_admin", async (req, res) => {
+    const { uid } = req.body;
+
+    try {
+        const user = await admin_auth.getUser(uid);
+        const userClaim = user.customClaims["group"];
+
+        if (userClaim === "admin") {
+            res.json({ isAdmin: true }); // Send JSON with isAdmin: true
+        } else {
+            res.json({ isAdmin: false }); // Send JSON with isAdmin: false
+        }
+    } catch (error) {
+        console.error("Error checking admin status:", error);
+        res.status(500).json({ error: "An error occurred." }); // Send a 500 error and JSON response
+    }
+});
 
 /* Register a new user */
 router.post("/register", async (req, res) => {
@@ -25,7 +44,10 @@ router.post("/register", async (req, res) => {
             active_semesters: [],
             teacher_ids: []
         });
-        console.log("User successfully created:", userCredential.user.uid);
+
+        await admin_auth.setCustomUserClaims(userCredential.user.uid, {group: "guest"})
+        const userClaim = await admin_auth.getUser(userCredential.user.uid);
+        console.log("User successfully created:", userCredential.user.uid, "User type: ", userClaim.customClaims["group"]);
 
         res.status(200).json({
             name,
