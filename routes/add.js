@@ -129,12 +129,6 @@ router.post("/classroom/teacher_students", async (req, res) => {
         await updateDoc(classroomRef, {
             teacher_students: arrayUnion(teacher_student_id),
         });
-
-        res.status(200).json({
-            status: "success",
-            message: "Teacher/student ID added to classroom",
-        });
-
     } catch (error) {
         console.error("Error updating classroom:", error);
         res.status(500).json({
@@ -142,6 +136,26 @@ router.post("/classroom/teacher_students", async (req, res) => {
             message: error.message,
         });
     }
+
+    try {
+        const userRef = doc(db, "Users", teacher_student_id); // Convert to string here
+
+        await updateDoc(userRef, {
+            teacher_ids: arrayUnion(teacher_id),
+        });
+    } catch (error) {
+        console.error("Error updating classroom:", error);
+        res.status(500).json({
+            status: "error",
+            message: error.message,
+        });
+    }
+
+    res.status(200).json({
+        status: "success",
+        message: "Teacher/student ID added to classroom",
+    });
+
 });
 
 router.post("/semester/teachers", async (req, res) => {
