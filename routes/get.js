@@ -89,6 +89,43 @@ router.get("/users", async (req, res) => {
     }
 });
 
+router.post("/user", async (req, res) => {
+    const { user_id } = req.body; // Retrieve user_id from the request body
+
+    if (!user_id) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required field: user_id.",
+        });
+    }
+
+    try {
+        const userRef = doc(db, "Users", user_id);
+        const userDoc = await getDoc(userRef); // Fetch the document from Firestore
+
+        if (!userDoc.exists()) {
+            return res.status(404).json({
+                status: "error",
+                message: "User not found.",
+            });
+        }
+
+        const userData = userDoc.data();
+        res.status(200).json({
+            status: "success",
+            data: userData, // Simplified response structure
+        });
+
+    } catch (error) {
+        console.error("Error fetching user:", error.message);
+        res.status(500).json({
+            status: "error",
+            message: "Internal server error.", // Avoid exposing internal error details
+        });
+    }
+});
+
+
 /* Get all teacher's students */
 router.get("/teacher_students", async (req, res) => {
     try {
@@ -108,6 +145,55 @@ router.get("/teacher_students", async (req, res) => {
         res.status(500).json({
             status: "error",
             message: error.message,
+        });
+    }
+});
+
+router.post("/teacher", async (req, res) => {
+    const base = new Airtable({ apiKey }).base(databaseID);
+    const teacherId = req.body.teacher_id; // Get teacher_id from the request body
+
+    if (!teacherId) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing 'teacher_id' in request body.",
+        });
+    }
+
+    try {
+        const record = await base(teacherScheduleTableID).find(teacherId);
+
+        if (!record) {
+            return res.status(404).json({
+                status: "error",
+                message: `Teacher with ID '${teacherId}' not found.`,
+            });
+        }
+
+        const teacher = {
+            id: record.id,
+            fields: record.fields,
+        };
+
+        res.status(200).json({
+            status: "success",
+            teacher: teacher, // Return a single teacher object
+        });
+
+    } catch (error) {
+        console.error("Error fetching teacher data from Airtable:", error);
+
+        // More specific error handling (optional):
+        if (error.message.includes("NOT_FOUND")) { // Check for Airtable's specific not found message
+            return res.status(404).json({
+                status: "error",
+                message: `Teacher with ID '${teacherId}' not found.`,
+            });
+        }
+
+        res.status(500).json({
+            status: "error",
+            message: "Failed to fetch teacher data.",
         });
     }
 });
